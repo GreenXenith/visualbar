@@ -1,6 +1,7 @@
 --[[ Config ]]--
 local disable_inventory = false
 local R = 1 -- Size of vbar radius
+local shape = "belt" -- Mode (belt or ring)
 
 local visuals = {}
 local hud = {}
@@ -17,6 +18,45 @@ local function set_item(entity, player)
 	player:set_wielded_item(main[entity.idx])
 	visuals[player:get_player_name()] = nil
 end
+
+vector.cross = vector.cross or function(a, b)
+	return {
+		x = a.y * b.z - a.z * b.y,
+		y = a.z * b.x - a.x * b.z,
+		z = a.x * b.y - a.y * b.x
+	}
+end
+
+local function dir_to_pitch(dir)
+    local pitch = minetest.dir_to_yaw({x = -dir.y, y = 0, z = math.sqrt(1 - dir.y * dir.y)})
+    return (pitch > math.pi) and (pitch - math.pi * 2) or pitch
+end
+
+local shapes = {
+	belt = function(player, slot)
+		local pos = player:get_pos()
+		pos.y = pos.y + 1
+		local angle = (-(360 / 8) * slot) + 45
+		local y = player:get_look_horizontal()
+		local rel = vector.multiply(minetest.yaw_to_dir(math.rad(angle) + y), R)
+		local target = vector.add(rel, pos)
+		local rot = vector.direction(target, pos)
+		return target, {x = 0, y = math.rad(angle) + y, z = 0}
+	end,
+	ring = function(player, slot) -- Thanks to Aaron Suen (Warr1024) for this
+		local camera_z = player:get_look_dir()
+		local camera_x = minetest.yaw_to_dir(player:get_look_horizontal() + math.pi / 2)
+		local camera_y = vector.cross(camera_x, camera_z)
+		local angle = ((360 / 8) * slot) + 45
+		local cv = {x = math.cos(math.rad(angle)) * R, y = math.sin(math.rad(angle)) * R, z = R * 2}
+		local wv = player:get_pos()
+		wv.y = wv.y + player:get_properties().eye_height
+		wv = vector.add(wv, vector.multiply(camera_x, cv.x))
+		wv = vector.add(wv, vector.multiply(camera_y, cv.y))
+		wv = vector.add(wv, vector.multiply(camera_z, cv.z))
+		return wv, {x = dir_to_pitch(camera_z), y = minetest.dir_to_yaw(camera_z), z = 0}
+	end,
+}
 
 minetest.register_entity("visualbar:item", {
 	initial_properties = {
@@ -75,18 +115,14 @@ local function display(player)
 
 	visuals[name] = table.copy(pos)
 
-	pos.y = pos.y + 1
-	local angle = 360 / 8
-	local y = player:get_look_horizontal()
 	for i = 1, 8 do
-		local rel = vector.multiply(minetest.yaw_to_dir(math.rad(i * -angle) + y + math.rad(45)), R)
-		local target = vector.add(pos, rel)
+		local target, rot = shapes[shape](player, i)
 		local ent = minetest.add_entity(target, "visualbar:item")
 		local luen = ent:get_luaentity()
 		local item = list[i]:get_name()
 		if item ~= "" then
 			ent:set_properties({wield_item = item, infotext = minetest.registered_items[item].description or item})
-			ent:set_yaw(minetest.dir_to_yaw(vector.direction(pos, ent:get_pos())))
+			ent:set_rotation(rot)
 			if list[i]:get_count() > 1 then
 				ent:set_nametag_attributes({
 					color = "white",
